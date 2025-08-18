@@ -1,0 +1,110 @@
+{
+    "name": "vscodep",
+    "displayName": "Code:P",
+    "description": "",
+    "version": "0.0.1",
+    "publisher": "jwintz",
+    "engines": {
+        "vscode": "^1.74.0"
+    },
+    "categories": [
+        "Other",
+        "Machine Learning"
+    ],
+    "keywords": [
+        "ai",
+        "workflow",
+        "specification",
+        "github",
+        "automation"
+    ],
+    "activationEvents": [
+        "workspaceContains:.github"
+    ],
+    "main": "./out/extension.js",
+    "browser": "./out/extension.web.js",
+    "contributes": {
+        "commands": [
+            {
+                "command": "codep.initWorkflow",
+                "title": "Code:P: Initialize Spec Workflow"
+            },
+            {
+                "command": "codep.continueWorkflow",
+                "title": "Code:P: Continue Workflow"
+            },
+            {
+                "command": "codep.injectConfig",
+                "title": "Code:P: Inject Configuration"
+            },
+            {
+                "command": "codep.refreshConfig",
+                "title": "Code:P: Refresh Configuration"
+            },
+            {
+                "command": "codep.showSpecNavigation",
+                "title": "Code:P: Show Spec Navigation"
+            }
+        ],
+        "menus": {
+            "editor/title": [
+                {
+                    "when": "resourceExtname == .md && resourcePath =~ /\\.github\\/specs\\/.*\\/*(requirements|design|task)*\\.md$/",
+                    "command": "codep.showSpecNavigation",
+                    "group": "navigation@0"
+                }
+            ]
+        },
+        "configuration": {
+            "title": "Code:P",
+            "properties": {
+                "codep.autoDiscovery": {
+                    "type": "boolean",
+                    "default": true,
+                    "description": "Automatically discover GitHub configuration files"
+                },
+                "codep.configDirectories": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    },
+                    "default": [
+                        ".github"
+                    ],
+                    "description": "Directories to scan for configuration files"
+                },
+                "codep.contextInjection.maxFileSize": {
+                    "type": "number",
+                    "default": 100000,
+                    "description": "Maximum file size (bytes) for automatic context injection"
+                },
+                "codep.workflow.autoSave": {
+                    "type": "boolean",
+                    "default": true,
+                    "description": "Automatically save workflow state"
+                }
+            }
+        }
+    },
+    "scripts": {
+        "vscode:prepublish": "npm run compile-production",
+        "compile": "tsc -p ./",
+        "compile-production": "webpack --mode production",
+        "watch": "tsc -watch -p ./",
+        "package": "vsce package",
+        "publish": "vsce publish"
+    },
+    "devDependencies": {
+        "@types/node": "16.x",
+        "@types/vscode": "^1.74.0",
+        "@vscode/vsce": "^2.15.0",
+        "path-browserify": "^1.0.1",
+        "ts-loader": "^9.4.0",
+        "typescript": "^4.9.4",
+        "webpack": "^5.75.0",
+        "webpack-cli": "^5.0.0"
+    },
+    "dependencies": {
+        "gray-matter": "^4.0.3"
+    }
+}

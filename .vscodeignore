@@ -1,0 +1,26 @@
+## Version: $Id:  $
+## 
+## 
+
+## Commentary:
+## 
+## 
+
+## Changelog:
+## 
+## 
+
+## 
+## Code starts here
+## #############################################################################
+
+node_modules
+.vscode*
+*.vsix
+.DS_Store
+src
+tsconfig.json
+webpack.config.js
+
+## #############################################################################
+## Code ends here
