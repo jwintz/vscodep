@@ -5,6 +5,7 @@ let outputChannel: vscode.OutputChannel;
 // ===== TYPES AND INTERFACES =====
 
 interface BundledFile {
+    absolutePath: string;
     relativePath: string;
     content: string;
 }
@@ -90,6 +91,7 @@ async function getBundledFiles(context: vscode.ExtensionContext): Promise<Bundle
         if (await fileExists(copilotInstructionsUri)) {
             const content = await vscode.workspace.fs.readFile(copilotInstructionsUri);
             bundledFiles.push({
+                absolutePath: copilotInstructionsUri.fsPath,
                 relativePath: '.github/copilot-instructions.md',
                 content: Buffer.from(content).toString('utf8')
             });
@@ -104,6 +106,7 @@ async function getBundledFiles(context: vscode.ExtensionContext): Promise<Bundle
                     const fileUri = vscode.Uri.joinPath(promptsUri, fileName);
                     const content = await vscode.workspace.fs.readFile(fileUri);
                     bundledFiles.push({
+                        absolutePath: fileUri.fsPath,
                         relativePath: `.github/prompts/${fileName}`,
                         content: Buffer.from(content).toString('utf8')
                     });
@@ -123,21 +126,17 @@ async function compareFileContents(bundledContent: string, workspaceContent: str
     return bundledContent.trim() === workspaceContent.trim();
 }
 
-async function showDiffEditor(bundledFile: BundledFile, workspaceUri: vscode.Uri): Promise<void> {
-    // Create a temporary URI for the bundled content
-    const bundledUri = vscode.Uri.parse(`untitled:Extension Bundle - ${bundledFile.relativePath}`);
+async function showDiffEditor(bundledFile: BundledFile, workspaceUri: vscode.Uri, index: number): Promise<void> {
+    
+    const bundledUri = vscode.Uri.parse(`${bundledFile.absolutePath}`);
 
-    // Create temporary document with bundled content
-    const doc = await vscode.workspace.openTextDocument(bundledUri);
-    const edit = new vscode.WorkspaceEdit();
-    edit.insert(bundledUri, new vscode.Position(0, 0), bundledFile.content);
-    await vscode.workspace.applyEdit(edit);
-
-    // Open diff editor
     await vscode.commands.executeCommand('vscode.diff',
         bundledUri,
         workspaceUri,
-        `${bundledFile.relativePath}: Extension Bundle ↔ Workspace`
+        `${bundledFile.relativePath}: Extension Bundle ↔ Workspace`,
+        {
+            preview: false
+        }
     );
 }
 
@@ -249,6 +248,8 @@ async function injectConfig(context: vscode.ExtensionContext): Promise<void> {
         }
 
         // Process each bundled file
+        const conflicts: { file: BundledFile, targetUri: vscode.Uri; }[] = [];
+
         for (const file of bundledFiles) {
             const targetUri = vscode.Uri.joinPath(workspaceRoot, file.relativePath);
 
@@ -258,8 +259,8 @@ async function injectConfig(context: vscode.ExtensionContext): Promise<void> {
                 const workspaceContentStr = Buffer.from(workspaceContent).toString('utf8');
 
                 if (!(await compareFileContents(file.content, workspaceContentStr))) {
-                    // Content differs, show diff editor
-                    await showDiffEditor(file, targetUri);
+                    // Content differs, collect for batch processing
+                    conflicts.push({ file, targetUri });
                     conflictCount++;
                     outputChannel.appendLine(`Conflict detected: ${file.relativePath}`);
                 }
@@ -270,6 +271,14 @@ async function injectConfig(context: vscode.ExtensionContext): Promise<void> {
                 copiedCount++;
                 outputChannel.appendLine(`Created: ${file.relativePath}`);
             }
+        }
+
+        // Open all diff editors with slight delays to ensure they all appear
+        for (let i = 0; i < conflicts.length; i++) {
+            const { file, targetUri } = conflicts[i];
+            setTimeout(() => {
+                showDiffEditor(file, targetUri, i);
+            }, i * 100); // 100ms delay between each diff editor
         }
 
         const message = `Configuration injection completed. Created: ${copiedCount}, Conflicts: ${conflictCount}`;

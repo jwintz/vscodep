@@ -1,6 +1,7 @@
 ---
 mode: agent
 description: "Specification Implementation Plan Prompt"
+---
 
 # Specification Implementation Plan Prompt
 
