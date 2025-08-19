@@ -198,6 +198,27 @@ async function isSpecComplete(feature: string): Promise<boolean> {
             return false;
         }
     }
+
+    // Check if tasks file has uncompleted tasks
+    const tasksFile = files.find(file => file.includes('03-tasks'));
+    if (tasksFile) {
+        try {
+            const tasksUri = vscode.Uri.file(tasksFile);
+            const tasksContent = await vscode.workspace.fs.readFile(tasksUri);
+            const contentStr = Buffer.from(tasksContent).toString('utf8');
+
+            // Check for uncompleted tasks (- [ ])
+            const hasUncompletedTasks = contentStr.includes('- [ ]');
+            if (hasUncompletedTasks) {
+                return false;
+            }
+        } catch (error) {
+            outputChannel.appendLine(`Error reading tasks file ${tasksFile}: ${error}`);
+            // If we can't read the file, assume it's incomplete
+            return false;
+        }
+    }
+
     return true;
 }
 
@@ -257,7 +278,15 @@ async function injectConfig(context: vscode.ExtensionContext): Promise<void> {
         if (conflictCount > 0) {
             vscode.window.showInformationMessage(`${message}. Please review and save the diff editors to resolve conflicts.`);
         } else {
-            vscode.window.showInformationMessage(message);
+            const selection = await vscode.window.showInformationMessage(
+                `${message}. Reload window to activate new configuration?`,
+                'Reload',
+                'Later'
+            );
+
+            if (selection === 'Reload') {
+                await vscode.commands.executeCommand('workbench.action.reloadWindow');
+            }
         }
 
     } catch (error) {
@@ -410,11 +439,11 @@ async function initWorkflow(context: vscode.ExtensionContext): Promise<void> {
             }
         }
 
-        // Trigger spec-01-requirements prompt
-        outputChannel.appendLine('About to trigger /spec-01-requirements prompt...');
+        // Trigger spec01 prompt
+        outputChannel.appendLine('About to trigger /spec01 prompt...');
 
         // Check if prompt file exists in workspace
-        const promptFile = vscode.Uri.joinPath(workspaceRoot, '.github', 'prompts', 'spec-01-requirements.prompt.md');
+        const promptFile = vscode.Uri.joinPath(workspaceRoot, '.github', 'prompts', 'spec01.prompt.md');
         const promptExists = await fileExists(promptFile);
         outputChannel.appendLine(`Prompt file exists in workspace: ${promptExists}`);
 
@@ -427,7 +456,7 @@ async function initWorkflow(context: vscode.ExtensionContext): Promise<void> {
 
         await vscode.commands.executeCommand('workbench.action.chat.open', '/spec01');
 
-        outputChannel.appendLine('Workflow initialization completed - spec-01-requirements prompt triggered');
+        outputChannel.appendLine('Workflow initialization completed - spec01 prompt triggered');
 
     } catch (error) {
         const errorMessage = `Error initializing workflow: ${error}`;
@@ -451,7 +480,11 @@ async function continueWorkflow(): Promise<void> {
         }
 
         if (incompleteFeatures.length === 0) {
-            vscode.window.showInformationMessage('No incomplete workflows found. All specifications are complete!');
+            if (features.length === 0) {
+                vscode.window.showInformationMessage('No specification exist.');
+            } else {
+                vscode.window.showInformationMessage('No incomplete workflows found. All specifications are complete!');
+            }
             return;
         }
 
@@ -466,25 +499,33 @@ async function continueWorkflow(): Promise<void> {
         });
 
         if (selected) {
-            // Open the most recent file in the spec
+            // Determine which phase to continue and execute appropriate prompt
             const files = await findSpecFiles(selected.label);
-            if (files.length > 0) {
-                // Sort files and open the most recent one
-                files.sort((a, b) => {
-                    const getPhaseNumber = (path: string) => {
-                        const match = path.match(/(\d{2})-/);
-                        return match ? parseInt(match[1]) : 0;
-                    };
-                    return getPhaseNumber(b) - getPhaseNumber(a);
-                });
 
-                const uri = vscode.Uri.file(files[0]);
-                await vscode.commands.executeCommand('vscode.open', uri);
+            // Check which phase needs to be worked on
+            const hasRequirements = files.some(file => file.includes('01-requirements'));
+            const hasDesign = files.some(file => file.includes('02-design'));
+            const hasTasks = files.some(file => file.includes('03-tasks') || file.includes('03-plan'));
 
-                vscode.window.showInformationMessage(
-                    `Continuing workflow for "${selected.label}". Use the appropriate spec prompt to continue development.`
-                );
+            let promptCommand = '';
+
+            if (!hasRequirements) {
+                promptCommand = '/spec01';
+            } else if (!hasDesign) {
+                promptCommand = '/spec02';
+            } else if (!hasTasks) {
+                promptCommand = '/spec03';
+            } else {
+                // Has all files but tasks are incomplete, continue with implementation
+                promptCommand = '/spec04';
             }
+
+            outputChannel.appendLine(`Executing prompt: ${promptCommand} for feature: ${selected.label}`);
+
+            // Execute the appropriate spec prompt
+            await vscode.commands.executeCommand('workbench.action.chat.open', promptCommand);
+
+            outputChannel.appendLine(`Workflow continuation completed - ${promptCommand} prompt triggered for "${selected.label}"`);
         }
 
     } catch (error) {

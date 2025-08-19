@@ -1,6 +1,6 @@
 ---
 mode: agent
-description: 
+description: "Specification Design Document Creation Prompt"
 ---
 
 # Specification Design Document Creation Prompt
