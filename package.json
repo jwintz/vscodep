@@ -3,19 +3,22 @@
     "displayName": "Code:P",
     "description": "",
     "version": "0.0.1",
+    "license": "MIT",
     "publisher": "jwintz",
+    "repository": {
+        "type": "git",
+        "url": "http://github.com/jwintz/vscodep"
+    },
     "engines": {
         "vscode": "^1.74.0"
     },
     "categories": [
-        "Other",
-        "Machine Learning"
+        "Other"
     ],
     "keywords": [
         "ai",
         "workflow",
         "specification",
-        "github",
         "automation"
     ],
     "activationEvents": [
@@ -54,36 +57,6 @@
                     "group": "navigation@0"
                 }
             ]
-        },
-        "configuration": {
-            "title": "Code:P",
-            "properties": {
-                "codep.autoDiscovery": {
-                    "type": "boolean",
-                    "default": true,
-                    "description": "Automatically discover GitHub configuration files"
-                },
-                "codep.configDirectories": {
-                    "type": "array",
-                    "items": {
-                        "type": "string"
-                    },
-                    "default": [
-                        ".github"
-                    ],
-                    "description": "Directories to scan for configuration files"
-                },
-                "codep.contextInjection.maxFileSize": {
-                    "type": "number",
-                    "default": 100000,
-                    "description": "Maximum file size (bytes) for automatic context injection"
-                },
-                "codep.workflow.autoSave": {
-                    "type": "boolean",
-                    "default": true,
-                    "description": "Automatically save workflow state"
-                }
-            }
         }
     },
     "scripts": {
@@ -104,7 +77,5 @@
         "webpack": "^5.75.0",
         "webpack-cli": "^5.0.0"
     },
-    "dependencies": {
-        "gray-matter": "^4.0.3"
-    }
+    "dependencies": { }
 }
