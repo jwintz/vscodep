@@ -4,6 +4,7 @@
     "description": "",
     "version": "0.0.1",
     "license": "MIT",
+    "icon": "package.png",
     "publisher": "jwintz",
     "repository": {
         "type": "git",
