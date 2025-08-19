@@ -1,7 +1,7 @@
 {
     "name": "vscodep",
     "displayName": "Code:P",
-    "description": "",
+    "description": "Pilot your development workflows with opinionated rules for AI",
     "version": "0.0.1",
     "license": "MIT",
     "icon": "package.png",
