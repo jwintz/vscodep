@@ -1,6 +1,7 @@
 import * as vscode from 'vscode';
 
 let outputChannel: vscode.OutputChannel;
+let statusBarItem: vscode.StatusBarItem;
 
 // ===== TYPES AND INTERFACES =====
 
@@ -15,6 +16,34 @@ interface SpecItem extends vscode.QuickPickItem {
     path: string;
     phase?: string;
 }
+
+interface TaskState {
+    feature: string;
+    taskIndex: number;
+    status: 'implementing' | 'completed' | 'pending';
+}
+
+interface TaskProgress {
+    totalTasks: number;
+    completedTasks: number;
+    currentTask: number | null;
+}
+
+interface TaskItem {
+    index: number;
+    text: string;
+    completed: boolean;
+    line: number;
+}
+
+// ===== GLOBAL STATE =====
+
+let currentTaskState: TaskState | null = null;
+let taskProgress: TaskProgress = {
+    totalTasks: 0,
+    completedTasks: 0,
+    currentTask: null
+};
 
 // Simple front-matter parser for web compatibility
 function parseFrontMatter(content: string): { content: string; data: any; } {
@@ -42,6 +71,206 @@ function parseFrontMatter(content: string): { content: string; data: any; } {
     }
 
     return { content: remainingContent, data };
+}
+
+// ===== TASK MANAGEMENT =====
+
+async function parseTasksFromFile(filePath: string): Promise<TaskItem[]> {
+    const uri = vscode.Uri.file(filePath);
+    try {
+        const content = await vscode.workspace.fs.readFile(uri);
+        const contentStr = Buffer.from(content).toString('utf8');
+        const lines = contentStr.split('\n');
+        const tasks: TaskItem[] = [];
+        
+        lines.forEach((line, index) => {
+            // Match tasks in format: - [ ] or - [x] with optional numbering
+            const taskMatch = line.match(/^\s*-\s*\[([x ])\]\s*(.+)$/);
+            if (taskMatch) {
+                tasks.push({
+                    index: tasks.length,
+                    text: taskMatch[2].trim(),
+                    completed: taskMatch[1] === 'x',
+                    line: index
+                });
+            }
+        });
+        
+        return tasks;
+    } catch (error) {
+        outputChannel.appendLine(`Error parsing tasks from ${filePath}: ${error}`);
+        return [];
+    }
+}
+
+async function updateTaskProgress(feature: string): Promise<void> {
+    const tasksFile = await findSpecFiles(feature);
+    const tasksFilePath = tasksFile.find(file => file.includes('03-tasks'));
+    
+    if (tasksFilePath) {
+        const tasks = await parseTasksFromFile(tasksFilePath);
+        taskProgress = {
+            totalTasks: tasks.length,
+            completedTasks: tasks.filter(task => task.completed).length,
+            currentTask: currentTaskState?.taskIndex || null
+        };
+        updateStatusBar();
+    }
+}
+
+function updateStatusBar(): void {
+    if (!statusBarItem) return;
+    
+    const { totalTasks, completedTasks, currentTask } = taskProgress;
+    
+    if (totalTasks === 0) {
+        statusBarItem.text = "$(checklist) Code:P Ready";
+        statusBarItem.tooltip = "Code:P Extension Status";
+        statusBarItem.show();
+        return;
+    }
+    
+    const progressPercent = Math.round((completedTasks / totalTasks) * 100);
+    const isImplementing = currentTaskState !== null;
+    const animatedDot = isImplementing ? ' $(sync~spin)' : '';
+    
+    statusBarItem.text = `$(checklist) ${completedTasks}/${totalTasks} (${progressPercent}%)${animatedDot}`;
+    statusBarItem.tooltip = isImplementing 
+        ? `Implementing task ${currentTask! + 1} of ${totalTasks}...`
+        : `${completedTasks} of ${totalTasks} tasks completed`;
+    statusBarItem.show();
+}
+
+async function startTaskImplementation(feature: string, taskIndex: number): Promise<void> {
+    currentTaskState = {
+        feature,
+        taskIndex,
+        status: 'implementing'
+    };
+    
+    await updateTaskProgress(feature);
+    
+    // Trigger spec04 workflow for this task
+    await vscode.commands.executeCommand('workbench.action.chat.open', `/spec04 task ${taskIndex + 1}`);
+    
+    outputChannel.appendLine(`Started implementation of task ${taskIndex + 1} in feature ${feature}`);
+}
+
+async function completeTaskImplementation(): Promise<void> {
+    if (!currentTaskState) return;
+    
+    const { feature, taskIndex } = currentTaskState;
+    await markTaskCompleted(feature, taskIndex);
+    
+    currentTaskState = null;
+    await updateTaskProgress(feature);
+    
+    outputChannel.appendLine(`Completed task ${taskIndex + 1} in feature ${feature}`);
+}
+
+async function markTaskCompleted(feature: string, taskIndex: number): Promise<void> {
+    const tasksFile = await findSpecFiles(feature);
+    const tasksFilePath = tasksFile.find(file => file.includes('03-tasks'));
+    
+    if (!tasksFilePath) return;
+    
+    try {
+        const uri = vscode.Uri.file(tasksFilePath);
+        const document = vscode.workspace.textDocuments.find(doc => doc.uri.fsPath === tasksFilePath);
+        
+        if (document) {
+            // If document is open, use WorkspaceEdit for live updates
+            const edit = new vscode.WorkspaceEdit();
+            const lines = document.getText().split('\n');
+            
+            let taskCount = 0;
+            for (let i = 0; i < lines.length; i++) {
+                const taskMatch = lines[i].match(/^\s*-\s*\[([x ])\]/);
+                if (taskMatch && taskCount === taskIndex) {
+                    const range = new vscode.Range(i, 0, i, lines[i].length);
+                    const newText = lines[i].replace(/^\s*-\s*\[\s\]/, '- [x]');
+                    edit.replace(uri, range, newText);
+                    break;
+                } else if (taskMatch) {
+                    taskCount++;
+                }
+            }
+            
+            await vscode.workspace.applyEdit(edit);
+        }
+        
+        outputChannel.appendLine(`Marked task ${taskIndex + 1} as completed`);
+        
+    } catch (error) {
+        outputChannel.appendLine(`Error marking task as completed: ${error}`);
+    }
+}
+
+// ===== CODELENS PROVIDER FOR TASK INTERACTION =====
+
+class TaskCodeLensProvider implements vscode.CodeLensProvider {
+    private _onDidChangeCodeLenses: vscode.EventEmitter<void> = new vscode.EventEmitter<void>();
+    public readonly onDidChangeCodeLenses: vscode.Event<void> = this._onDidChangeCodeLenses.event;
+
+    public async provideCodeLenses(document: vscode.TextDocument): Promise<vscode.CodeLens[]> {
+        const codeLenses: vscode.CodeLens[] = [];
+        
+        // Only provide CodeLenses for task files (03-tasks.md)
+        if (!document.fileName.includes('03-tasks.md') || !isSpecFile(document.fileName)) {
+            return codeLenses;
+        }
+        
+        const feature = getSpecFeature(document.fileName);
+        if (!feature) return codeLenses;
+        
+        const text = document.getText();
+        const lines = text.split('\n');
+        
+        let taskIndex = 0;
+        for (let lineIndex = 0; lineIndex < lines.length; lineIndex++) {
+            const line = lines[lineIndex];
+            const taskMatch = line.match(/^\s*-\s*\[(\s|x)\]\s*(.+)$/);
+            
+            if (taskMatch) {
+                const isCompleted = taskMatch[1] === 'x';
+                const isCurrentTask = currentTaskState?.taskIndex === taskIndex;
+                
+                if (!isCompleted) {
+                    const range = new vscode.Range(lineIndex, 0, lineIndex, 0);
+                    let title: string;
+                    let command: vscode.Command | undefined;
+                    
+                    if (isCurrentTask) {
+                        title = '$(sync~spin) Implementing...';
+                        command = undefined; // No click action while implementing
+                    } else {
+                        title = '$(play) Start Task';
+                        command = {
+                            title: 'Start Task Implementation',
+                            command: 'codep.startTask',
+                            arguments: [feature, taskIndex]
+                        };
+                    }
+                    
+                    codeLenses.push(new vscode.CodeLens(range, command ? {
+                        title,
+                        command: command.command,
+                        arguments: command.arguments
+                    } : {
+                        title,
+                        command: ''
+                    }));
+                }
+                taskIndex++;
+            }
+        }
+        
+        return codeLenses;
+    }
+
+    public refresh(): void {
+        this._onDidChangeCodeLenses.fire();
+    }
 }
 
 // ===== FILE UTILITIES =====
@@ -508,6 +737,9 @@ async function continueWorkflow(): Promise<void> {
         });
 
         if (selected) {
+            // Update task progress for the selected feature
+            await updateTaskProgress(selected.label);
+            
             // Determine which phase to continue and execute appropriate prompt
             const files = await findSpecFiles(selected.label);
 
@@ -553,16 +785,64 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
         outputChannel = vscode.window.createOutputChannel('Code:P');
         outputChannel.appendLine('Code:P Extension activating...');
 
+        // Create status bar item
+        statusBarItem = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Left, 100);
+        statusBarItem.text = "$(checklist) Code:P Ready";
+        statusBarItem.tooltip = "Code:P Extension Status";
+        statusBarItem.command = 'codep.showTaskProgress';
+        statusBarItem.show();
+        context.subscriptions.push(statusBarItem);
+
+        // Create and register CodeLens provider for task interaction
+        const taskCodeLensProvider = new TaskCodeLensProvider();
+        const codeLensDisposable = vscode.languages.registerCodeLensProvider(
+            { scheme: 'file', pattern: '**/*03-tasks.md' },
+            taskCodeLensProvider
+        );
+        context.subscriptions.push(codeLensDisposable);
+
         // Register commands
         const commands = [
             vscode.commands.registerCommand('codep.injectConfig', () => injectConfig(context)),
             vscode.commands.registerCommand('codep.refreshConfig', () => injectConfig(context)), // Alias
             vscode.commands.registerCommand('codep.showSpecNavigation', showSpecNavigation),
             vscode.commands.registerCommand('codep.initWorkflow', () => initWorkflow(context)),
-            vscode.commands.registerCommand('codep.continueWorkflow', continueWorkflow)
+            vscode.commands.registerCommand('codep.continueWorkflow', continueWorkflow),
+            vscode.commands.registerCommand('codep.startTask', async (feature: string, taskIndex: number) => {
+                await startTaskImplementation(feature, taskIndex);
+                taskCodeLensProvider.refresh();
+            }),
+            vscode.commands.registerCommand('codep.completeTask', async () => {
+                await completeTaskImplementation();
+                taskCodeLensProvider.refresh();
+            }),
+            vscode.commands.registerCommand('codep.showTaskProgress', async () => {
+                if (currentTaskState) {
+                    const { feature } = currentTaskState;
+                    const tasksFile = await findSpecFiles(feature);
+                    const tasksFilePath = tasksFile.find(file => file.includes('03-tasks'));
+                    if (tasksFilePath) {
+                        await vscode.commands.executeCommand('vscode.open', vscode.Uri.file(tasksFilePath));
+                    }
+                } else {
+                    await showSpecNavigation();
+                }
+            })
         ];
 
         context.subscriptions.push(...commands);
+
+        // Listen for document changes to update task progress
+        const documentChangeListener = vscode.workspace.onDidSaveTextDocument(async (document) => {
+            if (document.fileName.includes('03-tasks.md') && isSpecFile(document.fileName)) {
+                const feature = getSpecFeature(document.fileName);
+                if (feature) {
+                    await updateTaskProgress(feature);
+                    taskCodeLensProvider.refresh();
+                }
+            }
+        });
+        context.subscriptions.push(documentChangeListener);
 
         outputChannel.appendLine('Code:P Extension activated successfully');
 
@@ -588,8 +868,9 @@ export async function deactivate(): Promise<void> {
     try {
         outputChannel?.appendLine('Code:P Extension deactivating...');
 
-        // Dispose output channel
+        // Dispose output channel and status bar
         outputChannel?.dispose();
+        statusBarItem?.dispose();
 
     } catch (error) {
         console.error('Error during Code:P extension deactivation:', error);
