@@ -411,7 +411,21 @@ async function initWorkflow(context: vscode.ExtensionContext): Promise<void> {
         }
 
         // Trigger spec-01-requirements prompt
-        await vscode.commands.executeCommand('workbench.action.chat.open', '/spec-01-requirements');
+        outputChannel.appendLine('About to trigger /spec-01-requirements prompt...');
+
+        // Check if prompt file exists in workspace
+        const promptFile = vscode.Uri.joinPath(workspaceRoot, '.github', 'prompts', 'spec-01-requirements.prompt.md');
+        const promptExists = await fileExists(promptFile);
+        outputChannel.appendLine(`Prompt file exists in workspace: ${promptExists}`);
+
+        if (promptExists) {
+            const promptContent = await vscode.workspace.fs.readFile(promptFile);
+            const contentStr = Buffer.from(promptContent).toString('utf8');
+            outputChannel.appendLine(`Prompt file size: ${contentStr.length} characters`);
+            outputChannel.appendLine(`Prompt contains "MUST ask for feature name": ${contentStr.includes('MUST ask for the feature name')}`);
+        }
+
+        await vscode.commands.executeCommand('workbench.action.chat.open', '/spec01');
 
         outputChannel.appendLine('Workflow initialization completed - spec-01-requirements prompt triggered');
 

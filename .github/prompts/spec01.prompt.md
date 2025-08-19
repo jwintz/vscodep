@@ -1,24 +1,23 @@
 ---
 mode: agent
-description: ""
+description: "Specification Requirements Gathering Prompt"
 ---
 
 # Specification Requirements Gathering Prompt
 
 **Workflow Stage:** Requirements Gathering
 
-### 1. Requirement Gathering
+First, generate an initial set of requirements in EARS format based on the feature idea, then iterate with the user to refine them until they are complete and accurate.
 
-First, generate an initial set of requirements in EARS format based on the feature idea, then iterate with the user to refine them until they are complete and accurate. If no input has been provided, ask the user for a rough idea of the feature.
-
-Don't focus on code exploration in this phase. Instead, just focus on writing requirements which will later be turned into a design.
+Don't focus on code exploration in this phase. Instead, just focus on writing requirements which will later be turned into
+a design.
 
 **Constraints:**
 
-- The model MUST create a '.github/specs/{feature_name}/01-requirements.md' file
-- The model MUST ask for a rough idea of the feature from the user if no input has been provided
+- The model MUST ask for the feature name and description before proceeding if no input is provided
+- The model MUST create a '.github/specs/{feature_name}/01-requirements.md' file if it doesn't already exist
 - The model MUST generate an initial version of the requirements document based on the user's rough idea WITHOUT asking sequential questions first
-- The model MUST format the initial 01-requirements.md document with:
+- The model MUST format the initial requirements.md document with:
   - A clear introduction section that summarizes the feature
   - A hierarchical numbered list of requirements where each contains:
     - A user story in the format "As a [role], I want [feature], so that [benefit]"
