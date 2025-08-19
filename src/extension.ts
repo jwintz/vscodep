@@ -2,6 +2,7 @@ import * as vscode from 'vscode';
 
 let outputChannel: vscode.OutputChannel;
 let statusBarItem: vscode.StatusBarItem;
+let taskCodeLensProvider: TaskCodeLensProvider;
 
 // ===== TYPES AND INTERFACES =====
 
@@ -109,9 +110,23 @@ async function updateTaskProgress(feature: string): Promise<void> {
     
     if (tasksFilePath) {
         const tasks = await parseTasksFromFile(tasksFilePath);
+        const completedCount = tasks.filter(task => task.completed).length;
+        
+        // Add stack trace to see what's calling this function
+        const stack = new Error().stack;
+        outputChannel.appendLine(`UPDATE TASK PROGRESS CALLED FROM: ${stack?.split('\n')[2]?.trim() || 'unknown'}`);
+        outputChannel.appendLine(`UPDATE TASK PROGRESS: ${completedCount}/${tasks.length} tasks completed`);
+        
+        // Auto-clear currentTaskState if the current task is completed in the file
+        if (currentTaskState && tasks[currentTaskState.taskIndex]?.completed) {
+            outputChannel.appendLine(`AUTO-CLEARING: Task ${currentTaskState.taskIndex + 1} is completed in file, clearing currentTaskState`);
+            currentTaskState = null;
+            taskCodeLensProvider?.refresh();
+        }
+        
         taskProgress = {
             totalTasks: tasks.length,
-            completedTasks: tasks.filter(task => task.completed).length,
+            completedTasks: completedCount,
             currentTask: currentTaskState?.taskIndex || null
         };
         updateStatusBar();
@@ -131,8 +146,11 @@ function updateStatusBar(): void {
     }
     
     const progressPercent = Math.round((completedTasks / totalTasks) * 100);
-    const isImplementing = currentTaskState !== null;
+    const isImplementing = currentTaskState !== null && completedTasks < totalTasks;
     const animatedDot = isImplementing ? ' $(sync~spin)' : '';
+    
+    // Debug logging
+    outputChannel.appendLine(`Status Bar Update: currentTaskState=${currentTaskState ? 'SET' : 'NULL'}, isImplementing=${isImplementing}, completed=${completedTasks}/${totalTasks}`);
     
     statusBarItem.text = `$(checklist) ${completedTasks}/${totalTasks} (${progressPercent}%)${animatedDot}`;
     statusBarItem.tooltip = isImplementing 
@@ -142,6 +160,19 @@ function updateStatusBar(): void {
 }
 
 async function startTaskImplementation(feature: string, taskIndex: number): Promise<void> {
+    outputChannel.appendLine(`START TASK CALLED: task ${taskIndex + 1} in feature ${feature}`);
+    
+    // Safety check: Don't start already completed tasks
+    const tasksFile = await findSpecFiles(feature);
+    const tasksFilePath = tasksFile.find(file => file.includes('03-tasks'));
+    if (tasksFilePath) {
+        const tasks = await parseTasksFromFile(tasksFilePath);
+        if (tasks[taskIndex] && tasks[taskIndex].completed) {
+            outputChannel.appendLine(`ERROR: Attempted to start already completed task ${taskIndex + 1}`);
+            return;
+        }
+    }
+    
     currentTaskState = {
         feature,
         taskIndex,
@@ -160,12 +191,22 @@ async function completeTaskImplementation(): Promise<void> {
     if (!currentTaskState) return;
     
     const { feature, taskIndex } = currentTaskState;
+    outputChannel.appendLine(`BEFORE COMPLETION: currentTaskState=${currentTaskState ? 'SET' : 'NULL'} (task ${taskIndex + 1})`);
+    
     await markTaskCompleted(feature, taskIndex);
     
+    // Clear the current task state first
     currentTaskState = null;
+    outputChannel.appendLine(`AFTER CLEARING: currentTaskState=${currentTaskState ? 'SET' : 'NULL'}`);
+    
+    // Update progress (this will call updateStatusBar internally)
     await updateTaskProgress(feature);
     
+    // Refresh CodeLens to show "Task Complete"
+    taskCodeLensProvider?.refresh();
+    
     outputChannel.appendLine(`Completed task ${taskIndex + 1} in feature ${feature}`);
+    outputChannel.appendLine(`FINAL STATE: currentTaskState=${currentTaskState ? 'SET' : 'NULL'}`);
 }
 
 async function markTaskCompleted(feature: string, taskIndex: number): Promise<void> {
@@ -235,32 +276,34 @@ class TaskCodeLensProvider implements vscode.CodeLensProvider {
                 const isCompleted = taskMatch[1] === 'x';
                 const isCurrentTask = currentTaskState?.taskIndex === taskIndex;
                 
-                if (!isCompleted) {
-                    const range = new vscode.Range(lineIndex, 0, lineIndex, 0);
-                    let title: string;
-                    let command: vscode.Command | undefined;
-                    
-                    if (isCurrentTask) {
-                        title = '$(sync~spin) Implementing...';
-                        command = undefined; // No click action while implementing
-                    } else {
-                        title = '$(play) Start Task';
-                        command = {
-                            title: 'Start Task Implementation',
-                            command: 'codep.startTask',
-                            arguments: [feature, taskIndex]
-                        };
-                    }
-                    
-                    codeLenses.push(new vscode.CodeLens(range, command ? {
-                        title,
-                        command: command.command,
-                        arguments: command.arguments
-                    } : {
-                        title,
-                        command: ''
-                    }));
+                const range = new vscode.Range(lineIndex, 0, lineIndex, 0);
+                let title: string;
+                let command: vscode.Command | undefined;
+                
+                if (isCompleted) {
+                    title = '$(check) Task Complete';
+                    command = undefined; // No click action for completed tasks
+                } else if (isCurrentTask) {
+                    title = '$(sync~spin) Implementing...';
+                    command = undefined; // No click action while implementing
+                } else {
+                    title = '$(play) Start Task';
+                    command = {
+                        title: 'Start Task Implementation',
+                        command: 'codep.startTask',
+                        arguments: [feature, taskIndex]
+                    };
                 }
+                
+                codeLenses.push(new vscode.CodeLens(range, command ? {
+                    title,
+                    command: command.command,
+                    arguments: command.arguments
+                } : {
+                    title,
+                    command: ''
+                }));
+                
                 taskIndex++;
             }
         }
@@ -794,7 +837,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
         context.subscriptions.push(statusBarItem);
 
         // Create and register CodeLens provider for task interaction
-        const taskCodeLensProvider = new TaskCodeLensProvider();
+        taskCodeLensProvider = new TaskCodeLensProvider();
         const codeLensDisposable = vscode.languages.registerCodeLensProvider(
             { scheme: 'file', pattern: '**/*03-tasks.md' },
             taskCodeLensProvider
