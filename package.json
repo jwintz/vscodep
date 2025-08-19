@@ -65,6 +65,7 @@
         "compile": "tsc -p ./",
         "compile-production": "webpack --mode production",
         "watch": "tsc -watch -p ./",
+        "start": "npm run compile",
         "package": "vsce package",
         "publish": "vsce publish"
     },
