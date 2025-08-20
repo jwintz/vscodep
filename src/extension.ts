@@ -1,3 +1,19 @@
+// Version: $Id:  $
+// 
+// 
+
+// Commentary:
+// 
+// 
+
+// Changelog:
+// 
+// 
+
+// 
+// Code starts here
+// /////////////////////////////////////////////////////////////////////////////
+
 import * as vscode from 'vscode';
 
 let outputChannel: vscode.OutputChannel;
@@ -369,19 +385,23 @@ async function getBundledFiles(context: vscode.ExtensionContext): Promise<Bundle
             });
         }
 
-        // Get prompt files
-        const promptsUri = vscode.Uri.joinPath(githubUri, 'prompts');
-        if (await directoryExists(promptsUri)) {
-            const promptFiles = await vscode.workspace.fs.readDirectory(promptsUri);
-            for (const [fileName, type] of promptFiles) {
-                if (type === vscode.FileType.File && fileName.endsWith('.md')) {
-                    const fileUri = vscode.Uri.joinPath(promptsUri, fileName);
-                    const content = await vscode.workspace.fs.readFile(fileUri);
-                    bundledFiles.push({
-                        absolutePath: fileUri.fsPath,
-                        relativePath: `.github/prompts/${fileName}`,
-                        content: Buffer.from(content).toString('utf8')
-                    });
+        // Get files from configuration folders
+        const configFolders = ['hooks', 'instructions', 'steering', 'prompts'];
+        
+        for (const folder of configFolders) {
+            const folderUri = vscode.Uri.joinPath(githubUri, folder);
+            if (await directoryExists(folderUri)) {
+                const files = await vscode.workspace.fs.readDirectory(folderUri);
+                for (const [fileName, type] of files) {
+                    if (type === vscode.FileType.File && fileName.endsWith('.md')) {
+                        const fileUri = vscode.Uri.joinPath(folderUri, fileName);
+                        const content = await vscode.workspace.fs.readFile(fileUri);
+                        bundledFiles.push({
+                            absolutePath: fileUri.fsPath,
+                            relativePath: `.github/${folder}/${fileName}`,
+                            content: Buffer.from(content).toString('utf8')
+                        });
+                    }
                 }
             }
         }
@@ -396,6 +416,115 @@ async function getBundledFiles(context: vscode.ExtensionContext): Promise<Bundle
 
 async function compareFileContents(bundledContent: string, workspaceContent: string): Promise<boolean> {
     return bundledContent.trim() === workspaceContent.trim();
+}
+
+async function getFileModificationTime(uri: vscode.Uri): Promise<number> {
+    try {
+        const stat = await vscode.workspace.fs.stat(uri);
+        return stat.mtime;
+    } catch {
+        return 0;
+    }
+}
+
+async function hasConfigurationFiles(): Promise<boolean> {
+    try {
+        const workspaceRoot = await getWorkspaceRoot();
+        const githubUri = vscode.Uri.joinPath(workspaceRoot, '.github');
+        
+        if (!(await directoryExists(githubUri))) {
+            return false;
+        }
+
+        // Check for copilot-instructions.md
+        const copilotInstructionsUri = vscode.Uri.joinPath(githubUri, 'copilot-instructions.md');
+        if (await fileExists(copilotInstructionsUri)) {
+            return true;
+        }
+
+        // Check for configuration folders
+        const configFolders = ['hooks', 'instructions', 'steering', 'prompts'];
+        for (const folder of configFolders) {
+            const folderUri = vscode.Uri.joinPath(githubUri, folder);
+            if (await directoryExists(folderUri)) {
+                const files = await vscode.workspace.fs.readDirectory(folderUri);
+                if (files.length > 0) {
+                    return true;
+                }
+            }
+        }
+
+        return false;
+    } catch {
+        return false;
+    }
+}
+
+async function checkForConfigurationUpdates(context: vscode.ExtensionContext): Promise<boolean> {
+    try {
+        const workspaceRoot = await getWorkspaceRoot();
+        const bundledFiles = await getBundledFiles(context);
+        
+        if (bundledFiles.length === 0) {
+            return false;
+        }
+
+        let hasUpdates = false;
+        
+        for (const bundledFile of bundledFiles) {
+            const workspaceUri = vscode.Uri.joinPath(workspaceRoot, bundledFile.relativePath);
+            const bundledUri = vscode.Uri.joinPath(context.extensionUri, bundledFile.relativePath);
+            
+            if (await fileExists(workspaceUri)) {
+                // Compare modification times
+                const bundledMtime = await getFileModificationTime(bundledUri);
+                const workspaceMtime = await getFileModificationTime(workspaceUri);
+                
+                // If bundled file is newer, or if content differs, mark as needing update
+                if (bundledMtime > workspaceMtime) {
+                    outputChannel.appendLine(`Bundled file is newer: ${bundledFile.relativePath}`);
+                    hasUpdates = true;
+                } else {
+                    // Check content differences as fallback
+                    const workspaceContent = await vscode.workspace.fs.readFile(workspaceUri);
+                    const workspaceContentStr = Buffer.from(workspaceContent).toString('utf8');
+                    if (!(await compareFileContents(bundledFile.content, workspaceContentStr))) {
+                        outputChannel.appendLine(`Content differs: ${bundledFile.relativePath}`);
+                        hasUpdates = true;
+                    }
+                }
+            } else {
+                // File doesn't exist in workspace, so it's an update
+                outputChannel.appendLine(`Missing in workspace: ${bundledFile.relativePath}`);
+                hasUpdates = true;
+            }
+        }
+
+        return hasUpdates;
+    } catch (error) {
+        outputChannel.appendLine(`Error checking for configuration updates: ${error}`);
+        return false;
+    }
+}
+
+async function offerConfigurationRefresh(context: vscode.ExtensionContext): Promise<void> {
+    const hasUpdates = await checkForConfigurationUpdates(context);
+    
+    if (hasUpdates) {
+        outputChannel.appendLine('Configuration updates available, showing prompt to user');
+        
+        const selection = await vscode.window.showInformationMessage(
+            'Newer configuration files are available in the extension. Would you like to refresh your configuration?',
+            'Refresh Configuration',
+            'Not Now'
+        );
+
+        if (selection === 'Refresh Configuration') {
+            await injectConfig(context);
+        }
+    } else {
+        outputChannel.appendLine('No configuration updates needed');
+    }
 }
 
 async function showDiffEditor(bundledFile: BundledFile, workspaceUri: vscode.Uri, index: number): Promise<void> {
@@ -690,34 +819,6 @@ async function initWorkflow(context: vscode.ExtensionContext): Promise<void> {
         if (!configExists) {
             // Need to inject configuration first
             await injectConfig(context);
-        } else {
-            // Check if refresh is needed by comparing with bundled files
-            const bundledFiles = await getBundledFiles(context);
-            let needsRefresh = false;
-
-            for (const bundledFile of bundledFiles) {
-                const targetUri = vscode.Uri.joinPath(workspaceRoot, bundledFile.relativePath);
-                if (await fileExists(targetUri)) {
-                    const workspaceContent = await vscode.workspace.fs.readFile(targetUri);
-                    const workspaceContentStr = Buffer.from(workspaceContent).toString('utf8');
-                    if (!(await compareFileContents(bundledFile.content, workspaceContentStr))) {
-                        needsRefresh = true;
-                        break;
-                    }
-                }
-            }
-
-            if (needsRefresh) {
-                const selection = await vscode.window.showInformationMessage(
-                    'Configuration files may be outdated. Would you like to refresh them?',
-                    'Refresh',
-                    'Continue'
-                );
-
-                if (selection === 'Refresh') {
-                    await injectConfig(context);
-                }
-            }
         }
 
         // Trigger spec01 prompt
@@ -887,7 +988,27 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
         });
         context.subscriptions.push(documentChangeListener);
 
+        // Listen for workspace folder changes to check for configuration updates
+        const workspaceFoldersChangeListener = vscode.workspace.onDidChangeWorkspaceFolders(async () => {
+            outputChannel.appendLine('Workspace folders changed, checking for configuration updates...');
+            // Add a small delay to ensure the workspace is fully loaded
+            setTimeout(async () => {
+                if (await hasConfigurationFiles()) {
+                    await offerConfigurationRefresh(context);
+                }
+            }, 1000);
+        });
+        context.subscriptions.push(workspaceFoldersChangeListener);
+
         outputChannel.appendLine('Code:P Extension activated successfully');
+
+        // Check for configuration updates on activation
+        if (await hasConfigurationFiles()) {
+            outputChannel.appendLine('Configuration files found in workspace, checking for updates...');
+            await offerConfigurationRefresh(context);
+        } else {
+            outputChannel.appendLine('No configuration files found in workspace');
+        }
 
         // Show welcome message on first activation
         const isFirstRun = context.globalState.get('codep.firstRun', true);
@@ -898,7 +1019,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
 
     } catch (error) {
         const errorMessage = `Failed to activate Code:P extension: ${error}`;
-        outputChannel.appendLine(errorMessage);
+        outputChannel?.appendLine(errorMessage);
         vscode.window.showErrorMessage(errorMessage);
         throw error;
     }
@@ -933,3 +1054,6 @@ async function showWelcomeMessage(): Promise<void> {
         await vscode.commands.executeCommand('codep.initWorkflow');
     }
 }
+
+// /////////////////////////////////////////////////////////////////////////////
+// Code ends here

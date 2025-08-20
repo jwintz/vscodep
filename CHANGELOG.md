@@ -13,6 +13,15 @@ Types of changes include:
 - `Fixed` for any bug fixes
 - `Security` in case of vulnerabilities
 
+## [0.0.3] - 2025-08-20
+
+### Added
+
+- `codep.refreshConfig` on activation points:
+    
+    - [x] `onDidChangeWorkspaceFolders`
+    - [x] `onDidLoadExtension`
+
 ## [0.0.2] - 2025-08-19
 
 ### Fixed
