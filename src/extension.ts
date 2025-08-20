@@ -473,25 +473,15 @@ async function checkForConfigurationUpdates(context: vscode.ExtensionContext): P
         
         for (const bundledFile of bundledFiles) {
             const workspaceUri = vscode.Uri.joinPath(workspaceRoot, bundledFile.relativePath);
-            const bundledUri = vscode.Uri.joinPath(context.extensionUri, bundledFile.relativePath);
             
             if (await fileExists(workspaceUri)) {
-                // Compare modification times
-                const bundledMtime = await getFileModificationTime(bundledUri);
-                const workspaceMtime = await getFileModificationTime(workspaceUri);
+                // Compare content only - bundled files don't have meaningful modification times
+                const workspaceContent = await vscode.workspace.fs.readFile(workspaceUri);
+                const workspaceContentStr = Buffer.from(workspaceContent).toString('utf8');
                 
-                // If bundled file is newer, or if content differs, mark as needing update
-                if (bundledMtime > workspaceMtime) {
-                    outputChannel.appendLine(`Bundled file is newer: ${bundledFile.relativePath}`);
+                if (!(await compareFileContents(bundledFile.content, workspaceContentStr))) {
+                    outputChannel.appendLine(`Content differs: ${bundledFile.relativePath}`);
                     hasUpdates = true;
-                } else {
-                    // Check content differences as fallback
-                    const workspaceContent = await vscode.workspace.fs.readFile(workspaceUri);
-                    const workspaceContentStr = Buffer.from(workspaceContent).toString('utf8');
-                    if (!(await compareFileContents(bundledFile.content, workspaceContentStr))) {
-                        outputChannel.appendLine(`Content differs: ${bundledFile.relativePath}`);
-                        hasUpdates = true;
-                    }
                 }
             } else {
                 // File doesn't exist in workspace, so it's an update

@@ -1,8 +1,8 @@
 {
     "name": "vscodep",
     "displayName": "Code:P",
-    "description": "Pilot your development workflows with opinionated rules for AI",
-    "version": "0.0.3",
+    "description": "Where :P stands for Pilot",
+    "version": "0.0.4",
     "license": "MIT",
     "icon": "package.png",
     "publisher": "jwintz",

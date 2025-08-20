@@ -13,6 +13,12 @@ Types of changes include:
 - `Fixed` for any bug fixes
 - `Security` in case of vulnerabilities
 
+## [0.0.4] - 2025-08-20
+
+### Fixed
+
+- `codep.refreshConfig` on activation points
+
 ## [0.0.3] - 2025-08-20
 
 ### Added
