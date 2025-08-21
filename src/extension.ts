@@ -203,6 +203,127 @@ async function startTaskImplementation(feature: string, taskIndex: number): Prom
     outputChannel.appendLine(`Started implementation of task ${taskIndex + 1} in feature ${feature}`);
 }
 
+async function startTaskAutonomously(feature: string, taskIndex: number): Promise<void> {
+    outputChannel.appendLine(`AUTONOMOUS START TASK CALLED: task ${taskIndex + 1} in feature ${feature}`);
+    
+    // Safety check: Don't start already completed tasks
+    const tasksFile = await findSpecFiles(feature);
+    const tasksFilePath = tasksFile.find(file => file.includes('03-tasks'));
+    if (tasksFilePath) {
+        const tasks = await parseTasksFromFile(tasksFilePath);
+        if (tasks[taskIndex] && tasks[taskIndex].completed) {
+            outputChannel.appendLine(`ERROR: Attempted to start already completed task ${taskIndex + 1}`);
+            return;
+        }
+    }
+    
+    currentTaskState = {
+        feature,
+        taskIndex,
+        status: 'implementing'
+    };
+    
+    await updateTaskProgress(feature);
+    
+    // Refresh CodeLens to show "Implementing..."
+    taskCodeLensProvider?.refresh();
+    
+    outputChannel.appendLine(`Started autonomous implementation of task ${taskIndex + 1} in feature ${feature}`);
+}
+
+async function detectAndStartTaskFromContext(chatMessage: string): Promise<void> {
+    outputChannel.appendLine(`DETECTING TASK CONTEXT FROM: ${chatMessage.substring(0, 100)}...`);
+    
+    // Parse various spec04 task message formats:
+    // "/spec04 task 3"
+    // "/spec04 Execute task 2 in feature-name"
+    // "/spec04 implement task 1"
+    // "/spec04 start task 4"
+    const spec04Match = chatMessage.match(/\/spec04\s+(?:(?:task|execute|implement|start)\s+(?:task\s+)?(\d+)|Execute\s+task\s+(\d+)\s+in\s+([\w-]+))/i);
+    
+    if (spec04Match) {
+        let taskNumber: number;
+        let feature: string | null = null;
+        
+        if (spec04Match[1]) {
+            // Format: "/spec04 task 3", "/spec04 implement task 1", etc.
+            taskNumber = parseInt(spec04Match[1]) - 1; // Convert to 0-based index
+            
+            // Try to determine feature from current workspace context
+            const activeEditor = vscode.window.activeTextEditor;
+            if (activeEditor && isSpecFile(activeEditor.document.uri.fsPath)) {
+                feature = getSpecFeature(activeEditor.document.uri.fsPath);
+            } else {
+                // Find the most recent incomplete feature
+                const features = await findSpecFeatures();
+                for (const f of features) {
+                    const isComplete = await isSpecComplete(f);
+                    if (!isComplete) {
+                        feature = f;
+                        break;
+                    }
+                }
+            }
+        } else if (spec04Match[2] && spec04Match[3]) {
+            // Format: "/spec04 Execute task 2 in feature-name"
+            taskNumber = parseInt(spec04Match[2]) - 1; // Convert to 0-based index
+            feature = spec04Match[3];
+        } else {
+            return;
+        }
+        
+        if (feature && taskNumber >= 0) {
+            outputChannel.appendLine(`DETECTED TASK CONTEXT: task ${taskNumber + 1} in feature ${feature}`);
+            await startTaskAutonomously(feature, taskNumber);
+        }
+    }
+}
+
+async function getActiveSpecContext(): Promise<{feature: string, nextTaskIndex: number} | null> {
+    // First check if we have an active editor with a spec file
+    const activeEditor = vscode.window.activeTextEditor;
+    if (activeEditor && isSpecFile(activeEditor.document.uri.fsPath)) {
+        const feature = getSpecFeature(activeEditor.document.uri.fsPath);
+        if (feature) {
+            // Find the first uncompleted task in this feature
+            const tasksFile = await findSpecFiles(feature);
+            const tasksFilePath = tasksFile.find(file => file.includes('03-tasks'));
+            if (tasksFilePath) {
+                const tasks = await parseTasksFromFile(tasksFilePath);
+                const nextTaskIndex = tasks.findIndex(task => !task.completed);
+                if (nextTaskIndex >= 0) {
+                    return {
+                        feature,
+                        nextTaskIndex
+                    };
+                }
+            }
+        }
+    }
+    
+    // If no active spec file, find the most recent incomplete feature
+    const features = await findSpecFeatures();
+    for (const feature of features) {
+        const isComplete = await isSpecComplete(feature);
+        if (!isComplete) {
+            const tasksFile = await findSpecFiles(feature);
+            const tasksFilePath = tasksFile.find(file => file.includes('03-tasks'));
+            if (tasksFilePath) {
+                const tasks = await parseTasksFromFile(tasksFilePath);
+                const nextTaskIndex = tasks.findIndex(task => !task.completed);
+                if (nextTaskIndex >= 0) {
+                    return {
+                        feature,
+                        nextTaskIndex
+                    };
+                }
+            }
+        }
+    }
+    
+    return null;
+}
+
 async function completeTaskImplementation(): Promise<void> {
     if (!currentTaskState) return;
     
@@ -945,6 +1066,15 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
             vscode.commands.registerCommand('codep.startTask', async (feature: string, taskIndex: number) => {
                 await startTaskImplementation(feature, taskIndex);
                 taskCodeLensProvider.refresh();
+            }),
+            vscode.commands.registerCommand('codep.startTaskAutonomously', async (feature: string, taskIndex: number) => {
+                await startTaskAutonomously(feature, taskIndex);
+            }),
+            vscode.commands.registerCommand('codep.detectTaskContext', async (chatMessage: string) => {
+                await detectAndStartTaskFromContext(chatMessage);
+            }),
+            vscode.commands.registerCommand('codep.getActiveSpecContext', async (): Promise<{feature: string, nextTaskIndex: number} | null> => {
+                return await getActiveSpecContext();
             }),
             vscode.commands.registerCommand('codep.completeTask', async () => {
                 await completeTaskImplementation();

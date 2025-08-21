@@ -13,6 +13,12 @@ Types of changes include:
 - `Fixed` for any bug fixes
 - `Security` in case of vulnerabilities
 
+## [0.0.5] - 2025-08-21
+
+### Added
+
+- Autonomous Interface Updates
+
 ## [0.0.4] - 2025-08-20
 
 ### Fixed

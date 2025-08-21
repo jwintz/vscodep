@@ -12,10 +12,12 @@ Follow these instructions for user requests related to spec tasks. The user may 
 ## Executing Instructions
 
 - Before executing any tasks, ALWAYS ensure you have read the specs 01-requirements.md, 02-design.md and 03-tasks.md files. Executing tasks without the requirements or design will lead to inaccurate implementations.
+- When you start executing a task, IMMEDIATELY call the `codep.startTaskAutonomously` command with the appropriate feature name and task index (0-based) to update the interface state. This will show the task as "Implementing..." in the CodeLens and update the status bar with progress tracking.
 - Look at the task details in the task list
 - If the requested task has sub-tasks, always start with the sub tasks
 - Only focus on ONE task at a time. Do not implement functionality for other tasks.
 - Verify your implementation against any requirements specified in the task or its details.
+- When you complete a task, call the `codep.completeTask` command to mark the task as completed and update the interface state.
 - Once you complete the requested task, stop and let the user review. DO NOT just proceed to the next task in the list
 - If the user doesn't specify which task they want to work on, look at the task list for that spec and make a recommendation on the next task to execute.
 - Once a task has been completed, mark it as such in the current feature's `03-tasks.md`.

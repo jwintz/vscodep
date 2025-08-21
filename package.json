@@ -2,7 +2,7 @@
     "name": "vscodep",
     "displayName": "Code:P",
     "description": "Where :P stands for Pilot",
-    "version": "0.0.4",
+    "version": "0.0.5",
     "license": "MIT",
     "icon": "package.png",
     "publisher": "jwintz",
@@ -48,6 +48,18 @@
             {
                 "command": "codep.showSpecNavigation",
                 "title": "Code:P: Show Spec Navigation"
+            },
+            {
+                "command": "codep.startTaskAutonomously",
+                "title": "Code:P: Start Task Autonomously"
+            },
+            {
+                "command": "codep.detectTaskContext",
+                "title": "Code:P: Detect Task Context"
+            },
+            {
+                "command": "codep.getActiveSpecContext",
+                "title": "Code:P: Get Active Spec Context"
             }
         ],
         "menus": {
